@@ -5,8 +5,7 @@ import pkg_resources
 
 from gym_pybullet_drones.utils.enums import DroneModel
 
-
-class BaseControl(object):
+class BaseControlLearn(object):
     """Base class for control.
 
     Implements `__init__()`, `reset(), and interface `computeControlFromState()`,
@@ -18,7 +17,7 @@ class BaseControl(object):
 
     def __init__(self,
                  drone_model: DroneModel,
-                 g: float = 9.8
+                 g: float=9.8
                  ):
         """Common control classes __init__ method.
 
@@ -33,7 +32,7 @@ class BaseControl(object):
         #### Set general use constants #############################
         self.DRONE_MODEL = drone_model
         """DroneModel: The type of drone to control."""
-        self.GRAVITY = g * self._getURDFParameter('m')
+        self.GRAVITY = g*self._getURDFParameter('m')
         """float: The gravitational force (M*g) acting on each drone."""
         self.KF = self._getURDFParameter('kf')
         """float: The coefficient converting RPMs into thrust."""
@@ -54,6 +53,7 @@ class BaseControl(object):
     ################################################################################
 
     def computeControlFromState(self,
+                                aerodyn_pred,
                                 control_timestep,
                                 state,
                                 target_pos,
@@ -82,7 +82,8 @@ class BaseControl(object):
             (3,1)-shaped array of floats containing the desired roll, pitch, and yaw rates.
 
         """
-        return self.computeControl(control_timestep=control_timestep,
+        return self.computeControl(aerodyn_pred=aerodyn_pred,
+                                   control_timestep=control_timestep,
                                    cur_pos=state[0:3],
                                    cur_quat=state[3:7],
                                    cur_vel=state[10:13],
@@ -96,6 +97,7 @@ class BaseControl(object):
     ################################################################################
 
     def computeControl(self,
+                       aerodyn_pred,
                        control_timestep,
                        cur_pos,
                        cur_quat,
@@ -134,7 +136,7 @@ class BaseControl(object):
         """
         raise NotImplementedError
 
-    ################################################################################
+################################################################################
 
     def setPIDCoefficients(self,
                            p_coeff_pos=None,
@@ -167,8 +169,7 @@ class BaseControl(object):
         """
         ATTR_LIST = ['P_COEFF_FOR', 'I_COEFF_FOR', 'D_COEFF_FOR', 'P_COEFF_TOR', 'I_COEFF_TOR', 'D_COEFF_TOR']
         if not all(hasattr(self, attr) for attr in ATTR_LIST):
-            print(
-                "[ERROR] in BaseControl.setPIDCoefficients(), not all PID coefficients exist as attributes in the instantiated control class.")
+            print("[ERROR] in BaseControl.setPIDCoefficients(), not all PID coefficients exist as attributes in the instantiated control class.")
             exit()
         else:
             self.P_COEFF_FOR = self.P_COEFF_FOR if p_coeff_pos is None else p_coeff_pos
@@ -179,7 +180,7 @@ class BaseControl(object):
             self.D_COEFF_TOR = self.D_COEFF_TOR if d_coeff_att is None else d_coeff_att
 
     ################################################################################
-
+    
     def _getURDFParameter(self,
                           parameter_name: str
                           ):
@@ -201,7 +202,7 @@ class BaseControl(object):
         """
         #### Get the XML tree of the drone model to control ########
         URDF = self.DRONE_MODEL.value + ".urdf"
-        path = pkg_resources.resource_filename('gym_pybullet_drones', 'assets/' + URDF)
+        path = pkg_resources.resource_filename('gym_pybullet_drones', 'assets/'+URDF)
         URDF_TREE = etxml.parse(path).getroot()
         #### Find and return the desired parameter #################
         if parameter_name == 'm':
