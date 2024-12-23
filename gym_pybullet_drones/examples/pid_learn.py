@@ -14,6 +14,8 @@ import numpy as np
 import pybullet as p
 import matplotlib.pyplot as plt
 from sklearn.neural_network import MLPRegressor
+from sklearn.gaussian_process.kernels import RBF
+from sklearn.gaussian_process import GaussianProcessRegressor
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.envs.CtrlAviary import CtrlAviary
@@ -24,7 +26,7 @@ from gym_pybullet_drones.utils.utils import sync, str2bool
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
-DEFAULT_GUI = True
+DEFAULT_GUI = False
 DEFAULT_RECORD_VISION = False
 DEFAULT_PLOT = True
 DEFAULT_USER_DEBUG_GUI = False
@@ -40,9 +42,9 @@ def aerodyn_pred_estimate(obs, obs_prev, thrust_prev, torques_prev, ctrl, t_coun
     Predict aerodynamic disturbances based on the quadrotor's state and control
     """
 
-    K_buffer = 20   # Dataset buffer size
-    feat_full_dataset = np.empty((K_buffer, 10))
-    label_full_dataset = np.empty((K_buffer, 6))
+    K_buffer = 50   # Dataset buffer size
+    feat_full_dataset = np.zeros((K_buffer, 10))
+    label_full_dataset = np.zeros((K_buffer, 6))
 
     # Feature data @ (current time): [pz, vx, vy, vz, phi, theta, psi, p, q, r](1 - by - 10)
     new_data_feat = np.hstack([obs[2], obs[10:13], obs[7:10], obs[13:16]])
@@ -55,18 +57,19 @@ def aerodyn_pred_estimate(obs, obs_prev, thrust_prev, torques_prev, ctrl, t_coun
     feat_full_dataset[t_count % K_buffer] = last_data_feat
     label_full_dataset[t_count % K_buffer] = last_data_label
 
-    # Initialize MLP model by sklearn
-    mlp_model = MLPRegressor(hidden_layer_sizes=(32, 32), max_iter=1000, solver='adam')
+    # Initialize GPR model by sklearn
+    kernel = RBF(length_scale=1.0)
+    gpr = GaussianProcessRegressor(kernel=kernel)
     # Train the model and make predictions
     if t_count >= K_buffer:
         # Train the model on the full dataset
-        mlp_model.fit(feat_full_dataset, label_full_dataset)
+        gpr.fit(feat_full_dataset, label_full_dataset)
         # Perform prediction using the model for the new data
-        aerodyn_pred = mlp_model.predict([new_data_feat])
+        aerodyn_pred, sigma = gpr.predict(new_data_feat.reshape(1, -1), return_std=True)
     else:
         aerodyn_pred = np.zeros(6)
 
-    return aerodyn_pred
+    return aerodyn_pred, last_data_label
 
 def run(
         drone=DEFAULT_DRONES,
@@ -135,6 +138,8 @@ def run(
     action = np.zeros((num_drones, 4))
     obs_prev = np.zeros((num_drones, 20))
     aerodyn_pred = np.zeros((num_drones, 6))
+    aerodyn_pred_all = []
+    last_data_label_all = []
 
     #### Run the simulation ####################################
     START = time.time()
@@ -144,7 +149,7 @@ def run(
 
         for j in range(num_drones):
             # Predict aerodynamic disturbances based on the quadrotor's state and control
-            aerodyn_pred[j] = aerodyn_pred_estimate(
+            aerodyn_pred[j], last_data_label = aerodyn_pred_estimate(
                             obs[j], obs_prev[j], thrust_prev[j], torques_prev[j], ctrl[j], i, 1./env.CTRL_FREQ)
 
             #### Compute control for the current way point #############
@@ -159,7 +164,14 @@ def run(
 
             #### Go to the next way point and loop #####################
             wp_counters[j] = wp_counters[j] + 1 if wp_counters[j] < (NUM_WP - 1) else 0
-
+            
+            # Store as previous frame data
+            obs_prev[j] = obs[j]
+            thrust_prev[j] = thrust[j]
+            torques_prev[j] = torques[j]
+            aerodyn_pred_all.append(aerodyn_pred)
+            last_data_label_all.append(last_data_label)
+            
             #### Log the simulation ####################################
             logger.log(drone=j,
                        timestamp=i/env.CTRL_FREQ,
@@ -168,10 +180,6 @@ def run(
                        # control=np.hstack([INIT_XYZS[j, :]+TARGET_POS[wp_counters[j], :], INIT_RPYS[j, :], np.zeros(6)])
                        )
 
-            # Store as previous frame data
-            obs_prev[j] = obs[j]
-            thrust_prev[j] = thrust[j]
-            torques_prev[j] = torques[j]
 
         #### Printout ##############################################
         env.render()
@@ -190,6 +198,42 @@ def run(
     #### Plot the simulation results ###########################
     if plot:
         logger.plot()
+        # 转换 aerodyn_pred_all 为 numpy 数组
+        aerodyn_pred_all = np.array(aerodyn_pred_all)  # shape: (num_steps, num_drones, 6)
+        aerodyn_pred_all = np.squeeze(aerodyn_pred_all)  # 去掉单一维度 1
+
+        # 创建子图，每个气动扰动绘制一个图
+        fig, axes = plt.subplots(6, 1, figsize=(10, 12))  # 6个子图，每个子图表示一个气动扰动
+
+        # 绘制每个气动扰动的变化
+        disturbance_names = ['f_ax', 'f_ay', 'f_az', 'tau_ax', 'tau_ay', 'tau_az']
+        for disturbance_id in range(6):
+            axes[disturbance_id].plot(np.arange(576), aerodyn_pred_all[:, disturbance_id])
+            axes[disturbance_id].set_title(f"Disturbance: {disturbance_names[disturbance_id]}")
+            axes[disturbance_id].set_xlabel('Time Steps')
+            axes[disturbance_id].set_ylabel(f'{disturbance_names[disturbance_id]}')
+
+        plt.tight_layout()
+        plt.show()
+        
+        # 转换 aerodyn_pred_all 为 numpy 数组
+        last_data_label_all = np.squeeze(np.array(last_data_label_all))  # shape: (num_steps, num_drones, 6)
+
+        # 创建子图，每个气动扰动绘制一个图
+        fig, axes = plt.subplots(6, 1, figsize=(10, 12))  # 6个子图，每个子图表示一个气动扰动
+
+        # 绘制每个气动扰动的变化
+        disturbance_names = ['f_ax', 'f_ay', 'f_az', 'tau_ax', 'tau_ay', 'tau_az']
+        for disturbance_id in range(6):
+            axes[disturbance_id].plot(np.arange(576), last_data_label_all[:, disturbance_id])
+            axes[disturbance_id].set_title(f"Disturbance: {disturbance_names[disturbance_id]}")
+            axes[disturbance_id].set_xlabel('Time Steps')
+            axes[disturbance_id].set_ylabel(f'{disturbance_names[disturbance_id]}')
+
+        plt.tight_layout()
+        plt.show()
+
+        
 
 if __name__ == "__main__":
     #### Define and parse (optional) arguments for the script ##

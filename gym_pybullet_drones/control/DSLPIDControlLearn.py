@@ -293,19 +293,26 @@ class DSLPIDControlLearn(BaseControlLearn):
             exit()
 
     def compute_label_data(self, obs_cur, obs_prev, thrust_prev, torque_prev, Ts):
-        # Generate the label data for network training using state
-        # measurement and APPLIED control inputs.
-        # Input argument:
-        # - data_cur: [x(k,3:end) eul(k,:) omega(k,:)] @ time (k)
-        # - data_prev: same as above but @ time (k-1)
-        # - thrust_prev: applied thrust f in (f * R * e3) @ time (k-1) (scalar) 
-        # - torque_prev: applied torque @ time (k-1) (1-by-3)
-        # Output argument:
-        # - aerodyn_pred: network prediction on aerodynamics @ time (k-1) (6-by-1)
+        """
+        Generate the label data for network training using state measurement and APPLIED control inputs.
 
+        Args:
+            obs_cur (array): Quadrotor state at time (k).
+            obs_prev (array): Quadrotor state at time (k-1).
+            thrust_prev (float): Applied thrust at time (k-1) (scalar).
+            torque_prev (array): Applied torque at time (k-1) (1x3 array).
+            Ts (float): Sampling time step.
+
+        Returns:
+            np.array: Aerodynamic prediction (6x1 array).
+        """
+
+        # Parameters
         m = 0.027
         J = np.diag([1.4e-5, 1.4e-5, 2.17e-5])
 
+        # - data_cur: [pz, vx, vy, vz, eul omega] @ time (k)
+        # - data_prev: same as above but @ time (k-1)
         data_cur = np.hstack([obs_cur[2], obs_cur[10:13], obs_cur[7:10], obs_cur[13:16]])
         data_prev = np.hstack([obs_prev[2], obs_prev[10:13], obs_prev[7:10], obs_prev[13:16]])
     
