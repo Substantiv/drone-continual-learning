@@ -377,3 +377,30 @@ class Logger(object):
             plt.savefig(os.path.join('results', 'output_figure.png'))
         else:
             plt.show()
+
+    def plot_aerodyn_pred(self, aerodyn_pred_all, last_data_label_all):
+        aerodyn_pred_all = np.squeeze(np.array(aerodyn_pred_all))
+
+        fig, axes = plt.subplots(6, 1, figsize=(10, 12))
+        disturbance_names = ['f_ax', 'f_ay', 'f_az', 'tau_ax', 'tau_ay', 'tau_az']
+        for disturbance_id in range(6):
+            axes[disturbance_id].plot(np.arange(576), aerodyn_pred_all[:, disturbance_id])
+            axes[disturbance_id].set_title(f"Disturbance: {disturbance_names[disturbance_id]}")
+            axes[disturbance_id].set_xlabel('Time Steps')
+            axes[disturbance_id].set_ylabel(f'{disturbance_names[disturbance_id]}')
+
+        plt.tight_layout()
+        plt.show()
+
+        last_data_label_all = np.squeeze(np.array(last_data_label_all))
+
+        fig, axes = plt.subplots(6, 1, figsize=(10, 12))
+        disturbance_names = ['f_ax', 'f_ay', 'f_az', 'tau_ax', 'tau_ay', 'tau_az']
+        for disturbance_id in range(6):
+            axes[disturbance_id].plot(np.arange(576), last_data_label_all[:, disturbance_id])
+            axes[disturbance_id].set_title(f"Label: {disturbance_names[disturbance_id]}")
+            axes[disturbance_id].set_xlabel('Time Steps')
+            axes[disturbance_id].set_ylabel(f'{disturbance_names[disturbance_id]}')
+
+        plt.tight_layout()
+        plt.show()

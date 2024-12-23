@@ -37,9 +37,12 @@ class DSLPIDControlLearn(BaseControlLearn):
         self.P_COEFF_FOR = np.array([.4, .4, 1.25])
         self.I_COEFF_FOR = np.array([.05, .05, .05])
         self.D_COEFF_FOR = np.array([.2, .2, .5])
-        self.P_COEFF_TOR = np.array([70000., 70000., 60000.])
-        self.I_COEFF_TOR = np.array([.0, .0, 500.])
-        self.D_COEFF_TOR = np.array([20000., 20000., 12000.])
+        # self.P_COEFF_TOR = np.array([70000., 70000., 60000.])
+        # self.I_COEFF_TOR = np.array([.0, .0, 500.])
+        # self.D_COEFF_TOR = np.array([20000., 20000., 12000.])
+        self.P_COEFF_TOR = np.array([.7, .7, .6])
+        self.I_COEFF_TOR = np.array([.0, .0, 0.05])
+        self.D_COEFF_TOR = np.array([.2, .2, .12])
         self.PWM2RPM_SCALE = 0.2685
         self.PWM2RPM_CONST = 4070.3
         self.MIN_PWM = 20000
@@ -128,7 +131,7 @@ class DSLPIDControlLearn(BaseControlLearn):
 
         """
         self.control_counter += 1
-        thrust, computed_target_rpy, pos_e = self._dslPIDPositionControl(aerodyn_pred,
+        thrust, thrust_scale, computed_target_rpy, pos_e = self._dslPIDPositionControl(aerodyn_pred,
                                                                          control_timestep,
                                                                          cur_pos,
                                                                          cur_quat,
@@ -137,15 +140,15 @@ class DSLPIDControlLearn(BaseControlLearn):
                                                                          target_rpy,
                                                                          target_vel
                                                                          )
-        rpm, torques = self._dslPIDAttitudeControl(aerodyn_pred,
+        rpm, torques_scale = self._dslPIDAttitudeControl(aerodyn_pred,
                                                    control_timestep,
                                                    thrust,
                                                    cur_quat,
                                                    computed_target_rpy,
                                                    target_rpy_rates)
         cur_rpy = p.getEulerFromQuaternion(cur_quat)
-        return rpm, pos_e, computed_target_rpy[2] - cur_rpy[2], thrust, torques
-    
+        return rpm, pos_e, computed_target_rpy[2] - cur_rpy[2], thrust_scale, torques_scale
+
     ################################################################################
 
     def _dslPIDPositionControl(self,
@@ -209,7 +212,7 @@ class DSLPIDControlLearn(BaseControlLearn):
         target_euler = (Rotation.from_matrix(target_rotation)).as_euler('XYZ', degrees=False)
         if np.any(np.abs(target_euler) > math.pi):
             print("\n[ERROR] ctrl it", self.control_counter, "in Control._dslPIDPositionControl(), values outside range [-pi,pi]")
-        return thrust, target_euler, pos_e
+        return thrust, scalar_thrust, target_euler, pos_e
     
     ################################################################################
 
@@ -255,21 +258,22 @@ class DSLPIDControlLearn(BaseControlLearn):
         self.integral_rpy_e = np.clip(self.integral_rpy_e, -1500., 1500.)
         self.integral_rpy_e[0:2] = np.clip(self.integral_rpy_e[0:2], -1., 1.)
         #### PID target torques ####################################
-        target_torques = - np.multiply(self.P_COEFF_TOR, rot_e) \
+        target_torques_scale = - np.multiply(self.P_COEFF_TOR, rot_e) \
                          + np.multiply(self.D_COEFF_TOR, rpy_rates_e) \
                          + np.multiply(self.I_COEFF_TOR, self.integral_rpy_e) \
                          - aerodyn_pred[3:6]
+        target_torques = target_torques_scale * 10000
         target_torques = np.clip(target_torques, -3200, 3200)
         pwm = thrust + np.dot(self.MIXER_MATRIX, target_torques)
         pwm = np.clip(pwm, self.MIN_PWM, self.MAX_PWM)
-        return self.PWM2RPM_SCALE * pwm + self.PWM2RPM_CONST, target_torques
+        return self.PWM2RPM_SCALE * pwm + self.PWM2RPM_CONST, target_torques_scale
     
     ################################################################################
 
     def _one23DInterface(self,
                          thrust
                          ):
-        """Utility function interfacing 1, 2, or 3D thrust input use cases.
+        """ Utility function interfacing 1, 2, or 3D thrust input use cases.
 
         Parameters
         ----------
@@ -280,7 +284,6 @@ class DSLPIDControlLearn(BaseControlLearn):
         -------
         ndarray
             (4,1)-shaped array of integers containing the PWM (not RPMs) to apply to each of the 4 motors.
-
         """
         DIM = len(np.array(thrust))
         pwm = np.clip((np.sqrt(np.array(thrust)/(self.KF*(4/DIM)))-self.PWM2RPM_CONST)/self.PWM2RPM_SCALE, self.MIN_PWM, self.MAX_PWM)
